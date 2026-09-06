@@ -1,15 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Globe from 'react-globe.gl'
-import airportData from 'airports'
+import AIRPORT_COORDS from '../data/airportCoords'
 import { getTrips } from '../api'
-
-// Build IATA → {lat, lng} lookup from the full airports dataset (~7000 airports)
-const AIRPORT_COORDS = {}
-airportData.forEach((a) => {
-  if (a.iata && a.lat && a.lon) {
-    AIRPORT_COORDS[a.iata] = { lat: parseFloat(a.lat), lng: parseFloat(a.lon) }
-  }
-})
 
 function getCoords(airport) {
   if (!airport) return null
