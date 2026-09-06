@@ -1,44 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Globe from 'react-globe.gl'
+import airportData from 'airports'
 import { getTrips } from '../api'
 
-// Fallback coordinates for common airports
-const AIRPORT_COORDS = {
-  LHR: { lat: 51.477, lng: -0.461 }, CDG: { lat: 49.013, lng: 2.550 },
-  JFK: { lat: 40.640, lng: -73.779 }, LAX: { lat: 33.943, lng: -118.408 },
-  SIN: { lat: 1.359, lng: 103.989 }, DXB: { lat: 25.253, lng: 55.366 },
-  HKG: { lat: 22.308, lng: 113.915 }, NRT: { lat: 35.765, lng: 140.386 },
-  SYD: { lat: -33.946, lng: 151.177 }, AMS: { lat: 52.310, lng: 4.768 },
-  FRA: { lat: 50.033, lng: 8.571 },  MAD: { lat: 40.472, lng: -3.561 },
-  BCN: { lat: 41.297, lng: 2.078 },  FCO: { lat: 41.804, lng: 12.251 },
-  MUC: { lat: 48.354, lng: 11.786 }, ZRH: { lat: 47.464, lng: 8.549 },
-  VIE: { lat: 48.110, lng: 16.570 }, BRU: { lat: 50.902, lng: 4.484 },
-  CPH: { lat: 55.618, lng: 12.656 }, OSL: { lat: 60.194, lng: 11.100 },
-  ARN: { lat: 59.652, lng: 17.919 }, HEL: { lat: 60.317, lng: 24.963 },
-  IST: { lat: 40.977, lng: 28.815 }, DOH: { lat: 25.273, lng: 51.608 },
-  AUH: { lat: 24.433, lng: 54.651 }, BOM: { lat: 19.089, lng: 72.868 },
-  DEL: { lat: 28.556, lng: 77.100 }, BKK: { lat: 13.681, lng: 100.747 },
-  KUL: { lat: 2.746, lng: 101.710 }, CGK: { lat: -6.126, lng: 106.656 },
-  ICN: { lat: 37.463, lng: 126.440 }, PEK: { lat: 40.080, lng: 116.585 },
-  PVG: { lat: 31.143, lng: 121.805 }, GRU: { lat: -23.432, lng: -46.469 },
-  EZE: { lat: -34.822, lng: -58.536 }, MEX: { lat: 19.436, lng: -99.072 },
-  YYZ: { lat: 43.677, lng: -79.631 }, ORD: { lat: 41.978, lng: -87.905 },
-  ATL: { lat: 33.641, lng: -84.427 }, DFW: { lat: 32.897, lng: -97.038 },
-  MIA: { lat: 25.796, lng: -80.287 }, SFO: { lat: 37.619, lng: -122.375 },
-  SEA: { lat: 47.450, lng: -122.309 }, BOS: { lat: 42.365, lng: -71.010 },
-  IAD: { lat: 38.944, lng: -77.456 }, BUD: { lat: 47.437, lng: 19.261 },
-  WAW: { lat: 52.166, lng: 20.967 }, PRG: { lat: 50.100, lng: 14.260 },
-  LIS: { lat: 38.774, lng: -9.134 }, ATH: { lat: 37.936, lng: 23.944 },
-  DUB: { lat: 53.421, lng: -6.270 }, MAN: { lat: 53.354, lng: -2.275 },
-  EDI: { lat: 55.950, lng: -3.373 }, GVA: { lat: 46.238, lng: 6.109 },
-}
+// Build IATA → {lat, lng} lookup from the full airports dataset (~7000 airports)
+const AIRPORT_COORDS = {}
+airportData.forEach((a) => {
+  if (a.iata && a.lat && a.lon) {
+    AIRPORT_COORDS[a.iata] = { lat: parseFloat(a.lat), lng: parseFloat(a.lon) }
+  }
+})
 
 function getCoords(airport) {
   if (!airport) return null
   const pos = airport.position
   if (pos?.lat && pos?.lon) return { lat: pos.lat, lng: pos.lon }
-  const fallback = AIRPORT_COORDS[airport.iata]
-  return fallback || null
+  return AIRPORT_COORDS[airport.iata] || null
 }
 
 export default function GlobeView() {
@@ -81,7 +58,6 @@ export default function GlobeView() {
       .finally(() => setLoading(false))
   }, [])
 
-  // Auto-rotate
   useEffect(() => {
     const globe = globeRef.current
     if (!globe) return
