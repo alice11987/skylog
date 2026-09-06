@@ -6,7 +6,4 @@ export default defineConfig({
   build: {
     target: 'esnext',
   },
-  resolve: {
-    dedupe: ['three'],
-  },
 })

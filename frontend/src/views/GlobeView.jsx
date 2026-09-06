@@ -1,118 +1,138 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import Globe from 'react-globe.gl'
+import { useState, useEffect, useRef } from 'react'
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import AIRPORT_COORDS from '../data/airportCoords'
 import { getTrips } from '../api'
 
+function latLngToVec3(lat, lng, radius = 1) {
+  const phi = (90 - lat) * (Math.PI / 180)
+  const theta = (lng + 180) * (Math.PI / 180)
+  return new THREE.Vector3(
+    -radius * Math.sin(phi) * Math.cos(theta),
+     radius * Math.cos(phi),
+     radius * Math.sin(phi) * Math.sin(theta)
+  )
+}
+
+function buildArc(fromCoords, toCoords) {
+  const start = latLngToVec3(fromCoords.lat, fromCoords.lng, 1.001)
+  const end   = latLngToVec3(toCoords.lat,   toCoords.lng,   1.001)
+  const mid   = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5)
+  const dist  = start.distanceTo(end)
+  mid.normalize().multiplyScalar(1 + dist * 0.35)
+  const curve    = new THREE.QuadraticBezierCurve3(start, mid, end)
+  const points   = curve.getPoints(60)
+  const geometry = new THREE.BufferGeometry().setFromPoints(points)
+  const material = new THREE.LineBasicMaterial({ color: 0x3b82f6 })
+  return new THREE.Line(geometry, material)
+}
+
+function buildDot(lat, lng) {
+  const geo = new THREE.SphereGeometry(0.009, 8, 8)
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+  const dot = new THREE.Mesh(geo, mat)
+  dot.position.copy(latLngToVec3(lat, lng, 1.012))
+  return dot
+}
+
 function getCoords(airport) {
   if (!airport) return null
-  const pos = airport.position
-  if (pos?.lat && pos?.lon) return { lat: pos.lat, lng: pos.lon }
+  if (airport.position?.lat && airport.position?.lon)
+    return { lat: airport.position.lat, lng: airport.position.lon }
   return AIRPORT_COORDS[airport.iata] || null
 }
 
 export default function GlobeView() {
-  const globeRef = useRef()
-  const containerRef = useRef()
-  const [arcs, setArcs] = useState([])
-  const [points, setPoints] = useState([])
-  const [hovered, setHovered] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [dimensions, setDimensions] = useState({ width: 600, height: 500 })
-
-  // Measure container so globe fills available width
-  useEffect(() => {
-    if (!containerRef.current) return
-    const { offsetWidth } = containerRef.current
-    setDimensions({ width: offsetWidth || 600, height: 500 })
-  }, [])
+  const mountRef = useRef()
+  const [status, setStatus] = useState('loading') // loading | empty | ready | error
+  const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
+    let animId
+    let cancelled = false
+    const container = mountRef.current
+    if (!container) return
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.setSize(container.clientWidth, 500)
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    container.appendChild(renderer.domElement)
+
+    // Scene & camera
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(50, container.clientWidth / 500, 0.1, 100)
+    camera.position.z = 2.6
+
+    // Controls
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.enableDamping = true
+    controls.dampingFactor = 0.06
+    controls.autoRotate = true
+    controls.autoRotateSpeed = 0.4
+    controls.minDistance = 1.4
+    controls.maxDistance = 5
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7))
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8)
+    sun.position.set(5, 3, 5)
+    scene.add(sun)
+
+    // Globe
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 64, 64),
+      new THREE.MeshPhongMaterial({
+        map: new THREE.TextureLoader().load('//unpkg.com/three-globe/example/img/earth-night.jpg'),
+      })
+    )
+    scene.add(sphere)
+
+    // Animate loop
+    const animate = () => {
+      animId = requestAnimationFrame(animate)
+      controls.update()
+      renderer.render(scene, camera)
+    }
+    animate()
+
+    // Load trips and add arcs
     getTrips()
       .then((trips) => {
-        const arcData = []
-        const pointMap = {}
-
-        trips.forEach((trip) => {
-          const dep = trip.raw_data?.departure?.airport
-          const arr = trip.raw_data?.arrival?.airport
-          const from = getCoords(dep)
-          const to = getCoords(arr)
-          if (!from || !to) return
-
-          arcData.push({
-            id: trip.id,
-            label: `${trip.flight_number}  ${trip.origin} → ${trip.destination}`,
-            startLat: from.lat, startLng: from.lng,
-            endLat: to.lat, endLng: to.lng,
-          })
-
-          pointMap[trip.origin] = { lat: from.lat, lng: from.lng, iata: trip.origin }
-          pointMap[trip.destination] = { lat: to.lat, lng: to.lng, iata: trip.destination }
+        if (cancelled) return
+        const valid = trips.filter((t) => {
+          const from = getCoords(t.raw_data?.departure?.airport)
+          const to   = getCoords(t.raw_data?.arrival?.airport)
+          return from && to
         })
-
-        setArcs(arcData)
-        setPoints(Object.values(pointMap))
+        if (valid.length === 0) { setStatus('empty'); return }
+        const seen = new Set()
+        valid.forEach((trip) => {
+          const from = getCoords(trip.raw_data.departure.airport)
+          const to   = getCoords(trip.raw_data.arrival.airport)
+          scene.add(buildArc(from, to))
+          if (!seen.has(trip.origin))      { scene.add(buildDot(from.lat, from.lng)); seen.add(trip.origin) }
+          if (!seen.has(trip.destination)) { scene.add(buildDot(to.lat,   to.lng));   seen.add(trip.destination) }
+        })
+        setStatus('ready')
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
+      .catch((err) => { if (!cancelled) { setErrorMsg(err.message); setStatus('error') } })
+
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(animId)
+      controls.dispose()
+      renderer.dispose()
+      if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement)
+    }
   }, [])
 
-  // Enable auto-rotate after globe mounts
-  useEffect(() => {
-    if (loading || arcs.length === 0) return
-    const timer = setTimeout(() => {
-      const globe = globeRef.current
-      if (!globe) return
-      globe.controls().autoRotate = true
-      globe.controls().autoRotateSpeed = 0.4
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [loading, arcs])
-
-  const arcColor = useCallback(
-    (arc) => hovered?.id === arc.id ? '#60a5fa' : '#3b82f6',
-    [hovered]
-  )
-
   return (
-    <div ref={containerRef} className="w-full">
-      {loading && <p className="text-gray-400 text-center py-20">Loading globe…</p>}
-      {error && <p className="text-red-400 text-center py-20">{error}</p>}
-      {!loading && !error && arcs.length === 0 && (
-        <p className="text-gray-500 text-center py-20">
-          No trips with known coordinates yet — save a flight first.
-        </p>
-      )}
-      {!loading && !error && arcs.length > 0 && (
-        <div className="relative rounded-xl overflow-hidden">
-          {hovered && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-sm text-white shadow-lg pointer-events-none">
-              {hovered.label}
-            </div>
-          )}
-          <Globe
-            ref={globeRef}
-            width={dimensions.width}
-            height={dimensions.height}
-            backgroundColor="rgba(17,24,39,1)"
-            globeImageUrl="//unpkg.com/three-globe/example/img/earth-night.jpg"
-            arcsData={arcs}
-            arcColor={arcColor}
-            arcAltitude={0.3}
-            arcStroke={1.5}
-            arcDashLength={0.6}
-            arcDashGap={0.2}
-            arcDashAnimateTime={2000}
-            onArcHover={setHovered}
-            pointsData={points}
-            pointColor={() => '#ffffff'}
-            pointAltitude={0.01}
-            pointRadius={0.3}
-            pointLabel="iata"
-          />
-        </div>
-      )}
+    <div>
+      {status === 'loading' && <p className="text-gray-400 text-center py-6">Loading globe…</p>}
+      {status === 'error'   && <p className="text-red-400 text-center py-6">{errorMsg}</p>}
+      {status === 'empty'   && <p className="text-gray-500 text-center py-6">No trips saved yet — save a flight to see it on the map.</p>}
+      <div ref={mountRef} className="rounded-xl overflow-hidden" />
     </div>
   )
 }
