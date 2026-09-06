@@ -1,8 +1,12 @@
 import StatusBadge from './StatusBadge'
 
-function formatTime(isoString) {
-  if (!isoString) return '—'
-  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function formatTime(scheduledTime) {
+  // AeroDataBox returns scheduledTime as { utc: "...", local: "..." } or a plain string
+  const raw = scheduledTime?.local || scheduledTime?.utc || scheduledTime
+  if (!raw || typeof raw !== 'string') return '—'
+  const date = new Date(raw)
+  if (isNaN(date)) return '—'
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function FlightCard({ flight, onSave, saved = false }) {
