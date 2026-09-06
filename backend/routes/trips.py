@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 
 from database import get_db
@@ -46,7 +46,7 @@ async def save_trip(body: SaveTripRequest, db: AsyncSession = Depends(get_db)):
     trip = Trip(
         id=str(uuid.uuid4()),
         flight_number=body.flight_number.upper(),
-        date=body.date,
+        date=date.fromisoformat(body.date),
         origin=body.origin,
         destination=body.destination,
         status=body.status,
